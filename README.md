@@ -7,6 +7,8 @@
 Class 1a.Introduction to Machine Learning & Linear Regression 
 Youtube: https://youtu.be/c00yjmUp8UY?si=ZxAKjkDNFzIAoD-Z 
 
+
+
 **Practical Sessions**
 
 Class 1a. YouTube: [https://youtube.com/@aiandbiotech?feature=shared](https://youtu.be/cxc3lZPQUsI?si=WuDKEuo5ahNYUnDc)
