@@ -23,4 +23,5 @@ dog = dog %>% rename_with(
   .cols = contains ("...")
 )
 
-load("Akansha_Naithani_Class_1b_Assignment.RData")
+
+
