@@ -1,6 +1,14 @@
-# Practical Module 1-
+# Module 1
 
-**Class1a**---
+# Theory Sessions
+------------------
+Class 1a.Introduction to Machine Learning & Linear Regression 
+Youtube: https://youtu.be/c00yjmUp8UY?si=ZxAKjkDNFzIAoD-Z 
+
+# Practical Sessions
+
+Class 1a. YouTube: [https://youtube.com/@aiandbiotech?feature=shared](https://youtu.be/cxc3lZPQUsI?si=WuDKEuo5ahNYUnDc)
+GitHub: https://github.com/AI-Biotechnology-Bioinformatics/AI_and_Omics_Research_Internship_2025 
 
 Objectives: 
 Set up the R programming environment (R, RStudio, RTools) 
@@ -20,7 +28,6 @@ Installing and using essential packages like "dplyr"
 Understanding script–output–environment flow in RStudio
 
 
-🔗 Resource:
- YouTube: [https://youtube.com/@aiandbiotech?feature=shared](https://youtu.be/cxc3lZPQUsI?si=WuDKEuo5ahNYUnDc)
- GitHub: https://github.com/AI-Biotechnology-Bioinformatics/AI_and_Omics_Research_Internship_2025 
+
+ 
 
