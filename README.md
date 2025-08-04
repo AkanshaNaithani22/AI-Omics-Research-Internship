@@ -5,3 +5,24 @@ Understand R syntax, data types, and control structures
 Create and manage projects in R 
 Write custom functions and use key R packages (dplyr, ggplot2, DataExplorer) 
 Perform basic data exploration and visualization
+
+In this session: 
+Hands-on with R Programming: Installation, Scripting & Data Wrangling
+
+
+How to install R, RStudio, and Rtools
+Reading and exploring datasets using "read_excel()"
+Creating and modifying dataframes and column names
+Installing and using essential packages like "dplyr"
+Understanding script–output–environment flow in RStudio
+
+Screenshot Breakdown:
+Script – Writing and running R commands
+Environment – Viewing variables and data structures
+Outcome – Console feedback and results of our code
+
+🔗 Resources:
+ YouTube: [@AIandBiotech](https://youtu.be/cxc3lZPQUsI?si=4bAyYLzupMdij9Dq)
+ GitHub: [https://github.com/AI-Biotechnology-B...
+](https://github.com/AI-Biotechnology-Bioinformatics/AI_and_Omics_Research_Internship_2025)
+
