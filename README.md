@@ -1,8 +1,8 @@
-AI_and_Omics_Research_Internship_2025
+# AI_and_Omics_Research_Internship_2025
 
 # Module 1
 
-# Theory Sessions
+**Theory Sessions**
 
 Class 1a.Introduction to Machine Learning & Linear Regression 
 Youtube: https://youtu.be/c00yjmUp8UY?si=ZxAKjkDNFzIAoD-Z 
