@@ -1,0 +1,192 @@
+Genomics Data Analysis 
+(Transcriptomic data analysis using microarray data) 
+
+Objectives: 
+1. Overview of the analysis pipeline 
+2. Walkthrough of public datasets (ArrayExpress & NCBI GEO) 
+
+
+# Gene Expression 
+The process by which the instructions encoded in a gene are used to create a functional product, such as an RNA molecule or a protein. 
+
+# Same DNA, Different Expression 
+- All cells share the same DNA
+- Different cells express different sets of genes
+- Liver cells --> metabolism, detoxification 
+- Neurons --> neurotransmission, communication 
+
+# Gene Expression and Disease 
+Controlled by precise regulation 
+Dysregulation --> pathological states 
+
+     Cancer example: 
+     - Oncogenes activated 
+     - Tumor suppressor genes silenced 
+     - Result: uncontrolled cell proliferation 
+
+# Why study Expression ? 
+Identify up/downregulated genes 
+Reveal affected pathways 
+Discover potential therapeutic targets 
+
+      Key questions: 
+      - Which genes are on/off in a condition ? 
+      - How do healthy vs diseases tissue differ ? 
+      - How does a drug affect gene activity ? 
+
+
+# Technology Selection for Gene Expression Studies 
+1. Real- time PCR 
+  - best for few genes 
+  - Advantage: High precision, gold standard for validation
+
+2. Microarrays 
+  - use predefine probes to check the expression of thousands of genes 
+  - Advantage: cost effective, well suited for known transcripts & genes
+
+3. RNA-seq 
+  - Next generation seq method, Unbiased picture of gene exp by directly seq RNA
+  - Whole transcriptome
+  - Advantage: Higher resolution, detection of novel transcripts and genes
+
+Massive amount of gene expression data from microarrays are available in public repositories like ArrayExpress and NCBI GEO, making them a goldmine for computational biology 
+
+
+# Microarrays 
+Principle: DNA-DNA hybridisation 
+DNA fargments bind specifically to anothe rfragtment with complemenatry seq 
+
+1. Glass slide with thousands of DNA probes fixed on its surface 
+2. Sample RNA/DNA hybridizes to complementary probes
+3. Fluorescent dyes reveal transcript abundance 
+4. Signal intensity corresponds to gene expression level 
+
+- Each probe is a short DNA seq design to represent a specific gene 
+- These probes are immobilised at precise location so every sport correspond to one gene 
+- mRNA from sample is reverse transcribed to complimentary DNA or anti-sense RNA 
+- These cDNA moleculare are the labelled with fluorescent dyes and the labelled fragmts are the hybrisded with there complementary probe on microarray chip 
+- After hybridisation the slide is washed to remove unbound fragments leaving only the bound sequences
+
+- Result: the slide with a different fluoresceent intensitie at each spot 
+- these intensities reflect the expression level of genes in the sample
+
+- while comparing the fluorescent signals we can determine which genes are expressed in one sample 
+or expressed in both samples 
+or differentially expressed b/w the samples
+
+
+Next step: 
+
+# Feature Extraction  
+
+- Converting the scanned images of microarrays into quantifiable values and annonating each with the gene IDs, sample names and other useful information
+The output of this process is a large matrix of raw data 
+where rows corresponds to genes
+columns corresponds to sample 
+values represent exp levels 
+
+- In this way microarrays allow to measure expression levels of thousand of genes simultaneously 
+And this large matric of raw data we will use for furthe rdowndstream analsysis 
+
+
+# Microarray Raw Data File Types 
+- File format of the raw data depends on the platform 
+
+For eg. 
+1. Affymetrix platform produce 
+        .CEL (binary) file 
+       most widely used platform with most public dataset originating from them 
+
+2. Agilent array generate 
+   .txt file
+   and othe rplatforms may have their own formats 
+
+# Microarray Designs 
+There are two main designs for microarray experiments: 
+
+- One-Color Design 
+  - Each sample is hybridised to a separate array and the fluorescent intensity provide an absolute expression level value for each sample.
+
+-  Two-Color Design 
+  - Two samples are labelled with two dyes that are typically Cy3 for a control and Cy5 for test sign,
+    they hybridised together on the same chip 
+  - readout is the ratio of Cy5 and Cy3 signals which represent the action in the test sample realted to the control 
+
+--> while the dsign differ in both the downstream analysis is quite similar 
+
+# Analysis Workflow Overview 
+1. Data Retreival: publically available dataset 
+   - We download raw datasets from public databases 
+   - NCBI GEO or ArrayExpress
+   - In starting raw data is very important because it allows us to perform a fully reproducible data anlysis from the grounder.
+
+  # Arrayexpress is basically a public archive hosted at EMBL-EBI
+    - Originally design to store microarray experiments but over time it expand to include many Functional Genomic Dataset 
+      such as RNA-seq from High methylation sequencing and proteomic profiling by array 
+    - Since 2022 Arrayexpress has been fully integrated into Biostudies database 
+    - Can search for disease, tissue type or an experimental keyword
+    - Within the data set: 
+
+Accession: unique identifier number 
+Protocol: procedure of the experiment 
+Detail sample: detailed information of individual sample - disease type, age of the individual, factor type,  
+"*" this sign found at the bottom under raw data/protocol/variables etc: shows files are downloadable 
+MAGE-TAB files: contains files with info on sample and data relationship format file --> contain sample information detail in a file which was visible on data sample option 
+Processed file has "-" sign which means its data is already normalised 
+If dont want to work with raw data can use processed data when work with ML, we dont want to perfom any preprocessing steps 
+For this module we work with RAW DATA
+
+
+While searching for the dataset it is important to focus on the type of the study
+Like we are specifically looking for the dataset that compare two clear conditions
+For eg. Disease Vs control (cancer vs normal)  
+Avoid to select the subdivision of that disease like,
+ for a cancer if say breast cancer so don't select the subtypes of breast cancer
+ it should be breast cancer Vs normal tissue/blood sample/anyother source of datset
+ but condition should be a disease Vs normal not subtypes --> for binary analysis 
+
+-- select the dataset that has >30 samples because 
+    a larger sample size improves the statistical reliability and give us more robust result when training predictive models  
+
+Summary: 
+a. For analysis we need ---> raw data file or SDRF files 
+b. disease Vs normal
+c. sufficient sample size 
+
+
+2. Preprocessing 
+   Two tasks: 
+     a. Quality control step: check the quality of the array and the oulier sample
+     b. Normalisation of the data: where we reduce the technical variation across array while preserving there biological differences  
+   
+    - Together these steps make sure that the data is reliable and comparable for further analysis 
+
+3. Differential Gene Expression Analysis: 
+    - At this stage we compare gene expression which means different groups 
+    - For eg. Disease Vs control to identify the genes that are significantly upregulated or downregulated in different conditions  
+      like say which genes are highly expressed in cancer comapre to the normal tissues  
+    - Like significant p value don't define the biological relevance or the biological interpretation for that particular genes  
+    - So we need some biological interpretation at inside for our genes that is why we move to next step 
+
+4. Annotation & Metadata 
+    - We perform functional enrichment analysis using different methods  
+      like Gene Ontology & KEGG pathway analysis 
+    - This helps us interpret the biological meaning of that particular gene 
+    - Follwoing annotation we explore the data further in the next step
+
+5. Distance Prediction & Clustering 
+   - Visualisation techniques 
+   - This involves the looking at the relationship b/w the samples & the genes 
+
+6. Class prediction (Machine Learning)
+   - In the last step we use machine learning algorithms 
+   - Such as Random Forest, Support vector machine and artificial neural network to build productive models.   
+
+
+
+
+
+
+
+
+
