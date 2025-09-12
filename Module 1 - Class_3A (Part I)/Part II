@@ -1,1 +1,17 @@
 # Microarray Dataset From NCBI-GEO
+                               Gene Expression Omnibus 
+
+It is the largest public repository for functional genomics data 
+Find datasets for a microarray RNA-seq study & many other high-throughput experiments 
+
+For eg; 
+1. Search "gastric cancer" 
+2. Select from the GEO datasets  
+3. Select Expression profiling by array    
+
+Expression profiling by array means high-throughput sequencing 
+- Each entry has a character, a short description, and the number of samples 
+
+
+
+
