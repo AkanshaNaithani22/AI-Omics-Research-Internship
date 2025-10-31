@@ -4,12 +4,6 @@
 # Workflow: QC (raw) → RMA normalization → QC (norm) → filtering → groups
 # =====================================================================
 
-#Subfolders 
-dir.create("raw_Data")
-dir.create("clean_data")
-dir.create("scripts")
-dir.create("results")
-dir.create("plots")
 
 #### 0) Packages ####
 if (!requireNamespace("BiocManager", quietly = TRUE)) 
@@ -192,5 +186,6 @@ cat(" RAW QC flagged:", if (exists("flagged_raw")) nrow(flagged_raw) else NA, "\
 cat(" NORM QC flagged:", if (exists("flagged_norm")) nrow(flagged_norm) else NA, "\n")
 cat(" Probes before:", nrow(expr), " after:", nrow(filtered_expr), "\n")
 print(table(groups))
+
 
 
