@@ -11,13 +11,14 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 BiocManager::install(c(
   "ArrayExpress","affy","arrayQualityMetrics","limma",
-  "Biobase","AnnotationDbi","affyPLM"
+  "Biobase","AnnotationDbi","affyPLM", "hgu133plus2cdf"
 ), ask = FALSE, update = TRUE)
 
 install.packages("matrixStats", dependencies = TRUE)
 
 library(ArrayExpress)
 library(affy)
+library(hgu133plus2cdf)
 library(arrayQualityMetrics)
 library(limma)
 library(Biobase)
@@ -186,6 +187,7 @@ cat(" RAW QC flagged:", if (exists("flagged_raw")) nrow(flagged_raw) else NA, "\
 cat(" NORM QC flagged:", if (exists("flagged_norm")) nrow(flagged_norm) else NA, "\n")
 cat(" Probes before:", nrow(expr), " after:", nrow(filtered_expr), "\n")
 print(table(groups))
+
 
 
 
