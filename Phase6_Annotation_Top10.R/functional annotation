@@ -1,0 +1,488 @@
+#################################################################
+### PHASE 6: Functional Annotation & Validation (Top 10 Turquoise hubs)
+### Script name: Phase6_Annotation_Top10.R
+### Style: matches earlier phase scripts (big header blocks, inline comments)
+#################################################################
+
+#################################################################
+### 0. Setup: packages, helper functions, and output folder
+#################################################################
+
+# Required CRAN/Bioconductor packages
+required_pkgs <- c(
+  "dplyr","readr","tibble","biomaRt","clusterProfiler",
+  "org.Hs.eg.db","ggplot2","pheatmap","RColorBrewer",
+  "igraph","tidyr","ReactomePA"
+)
+
+# Install & load (attempt CRAN first, BiocManager for Bioconductor)
+for(pkg in required_pkgs){
+  if(!suppressWarnings(require(pkg, character.only = TRUE))){
+    message("Installing package: ", pkg)
+    install.packages(pkg, dependencies = TRUE, repos = "https://cloud.r-project.org")
+    suppressWarnings(library(pkg, character.only = TRUE))
+  } else {
+    suppressWarnings(library(pkg, character.only = TRUE))
+  }
+}
+
+# Bioconductor dependencies
+if(!suppressWarnings(require("BiocManager"))){
+  install.packages("BiocManager", repos = "https://cloud.r-project.org")
+  library(BiocManager)
+}
+if(!suppressWarnings(require("ReactomePA"))){
+  BiocManager::install("ReactomePA", ask = FALSE, update = FALSE)
+  library(ReactomePA)
+}
+if(!suppressWarnings(require("clusterProfiler"))){
+  BiocManager::install("clusterProfiler", ask = FALSE, update = FALSE)
+  library(clusterProfiler)
+}
+if(!suppressWarnings(require("org.Hs.eg.db"))){
+  BiocManager::install("org.Hs.eg.db", ask = FALSE, update = FALSE)
+  library(org.Hs.eg.db)
+}
+
+# Helper to safely read CSV (returns NULL + message if missing)
+safe_read <- function(path){
+  if(file.exists(path)){
+    return(readr::read_csv(path, show_col_types = FALSE))
+  } else {
+    message("[safe_read] File not found: ", path)
+    return(NULL)
+  }
+}
+
+# Output folder
+outdir <- "Phase6_outputs"
+if(!dir.exists(outdir)) dir.create(outdir)
+
+#################################################################
+### 1. Load inputs: WGCNA hubs, coexpression edges, DEG table
+#################################################################
+
+# Why: we need three main inputs:
+# - WGCNA hub ncRNAs (turquoise module hubs) — structural hubs
+# - coexpression edges (ncRNA <-> mRNA) — functional links
+# - DEG results for selecting the most dysregulated ncRNAs by fold change
+wgcna_hubs <- safe_read("Turquoise_Module_Hub_ncRNAs.csv")
+coexpr <- safe_read("ncRNA_mRNA_coexpression_results.csv")
+deg_table <- safe_read("ncRNA_DEG_LUAD_FINAL.csv")
+
+# Try to load workspace if available (master_norm_matrix, MEs etc.)
+if(file.exists("final.RData")){
+  message("Loading final.RData (may provide master_norm_matrix or other objects)...")
+  load("final.RData")
+}
+
+# Validate inputs
+if(is.null(wgcna_hubs)) stop("Turquoise_Module_Hub_ncRNAs.csv not found. Please provide WGCNA hub file.")
+if(is.null(coexpr)) stop("ncRNA_mRNA_coexpression_results.csv not found. Please provide coexpression results.")
+if(is.null(deg_table)) stop("ncRNA_DEG_LUAD_FINAL.csv not found. Please provide DEG results.")
+
+#################################################################
+### 2. Select top 10 hub ncRNAs from turquoise module (Option A)
+#################################################################
+
+# Why: Top hubs are most central in the WGCNA module and likely key regulators.
+# We'll use the hub score column if present; otherwise take top by ModuleMembership or Hub_Score columns.
+
+# Normalize column names to lower case for safer detection
+names(wgcna_hubs) <- tolower(names(wgcna_hubs))
+
+# Try common naming options used in the pipeline
+hub_col_guess <- NULL
+if("hub_score" %in% names(wgcna_hubs)) hub_col_guess <- "hub_score"
+if(is.null(hub_col_guess) & "modulemembership" %in% names(wgcna_hubs)) hub_col_guess <- "modulemembership"
+if(is.null(hub_col_guess)) hub_col_guess <- names(wgcna_hubs)[1]  # fallback to first column
+
+# Ensure we have a column with ncRNA names; detect column
+name_col <- NULL
+possible_name_cols <- c("ncRNA","ncrna","nc_rna","gene","gene_name","nc_name")
+for(cn in possible_name_cols){
+  if(cn %in% names(wgcna_hubs)){ name_col <- cn; break }
+}
+if(is.null(name_col)) name_col <- names(wgcna_hubs)[1]  # fallback
+
+# Prepare hub table and take top 10
+hub_table <- wgcna_hubs %>%
+  rename_with(.fn = tolower) %>%
+  mutate(.name_col = .data[[name_col]])  # keep original names accessible
+
+# If a numeric hub score column not found, fall back to ordering by first numeric column
+if(!hub_col_guess %in% names(hub_table)){
+  numeric_cols <- names(hub_table)[sapply(hub_table, is.numeric)]
+  if(length(numeric_cols) > 0) hub_col_guess <- numeric_cols[1]
+}
+
+# Order and select top 10
+hub_table <- hub_table %>% mutate(.hub_metric = as.numeric(.data[[hub_col_guess]]))
+hub_table <- hub_table %>% arrange(desc(.hub_metric))
+top10_hubs <- unique(na.omit(hub_table$.name_col))[1:10]
+top10_hubs <- top10_hubs[!is.na(top10_hubs)]
+message("Top 10 hub ncRNAs selected (Turquoise): ", paste(top10_hubs, collapse = ", "))
+
+# Save selection
+readr::write_csv(tibble(ncRNA = top10_hubs), file.path(outdir, "Top10_Turquoise_Hub_ncRNAs.csv"))
+
+#################################################################
+### 3. Identify mRNAs with strongest correlation to those top10 hubs
+#################################################################
+
+# Why: we want the most strongly co-expressed mRNA targets for each hub ncRNA,
+# because these are the likely downstream effectors and will be used for enrichment.
+
+# Standardize coexpression column names
+coexpr_cols <- tolower(colnames(coexpr))
+colnames(coexpr) <- coexpr_cols
+
+# Find the column names for ncRNA, mRNA, correlation, pvalue, fdr
+nc_col <- grep("^nc", colnames(coexpr), value = TRUE)[1]
+m_col  <- grep("^m", colnames(coexpr), value = TRUE)[1]
+corr_col <- grep("correlation|cor$", colnames(coexpr), ignore.case = TRUE, value = TRUE)[1]
+p_col <- grep("pvalue|p.value|p_val|p$", colnames(coexpr), ignore.case = TRUE, value = TRUE)[1]
+fdr_col <- grep("fdr|adj|padj|adj.p", colnames(coexpr), ignore.case = TRUE, value = TRUE)[1]
+
+# If detection failed, fallbacks:
+if(is.na(nc_col)) nc_col <- colnames(coexpr)[1]
+if(is.na(m_col)) m_col <- colnames(coexpr)[2]
+if(is.na(corr_col)) corr_col <- colnames(coexpr)[3]
+
+# Pull strong correlations for top10 hubs
+# We'll pick top N mRNAs per hub by absolute correlation
+topN_per_hub <- 10   # adjustable
+edges_list <- list()
+for(h in top10_hubs){
+  # subset rows for this ncRNA
+  rows_h <- coexpr %>% filter(.data[[nc_col]] == h)
+  if(nrow(rows_h) == 0) next
+  # compute absolute correlation and order
+  rows_h <- rows_h %>% mutate(abs_corr = abs(as.numeric(.data[[corr_col]])))
+  rows_h_ordered <- rows_h %>% arrange(desc(abs_corr))
+  top_rows <- head(rows_h_ordered, topN_per_hub)
+  top_rows$hub_ncRNA <- h
+  edges_list[[h]] <- top_rows
+}
+edges_top <- dplyr::bind_rows(edges_list)
+
+# Remove duplicates and keep relevant columns
+if(nrow(edges_top) == 0){
+  warning("No strong ncRNA-mRNA correlations found for the top10 hubs. Check coexpression file and gene names.")
+} else {
+  edges_top_clean <- edges_top %>%
+    select(hub_ncRNA, everything()) %>%
+    select(hub_ncRNA, all_of(m_col), all_of(corr_col), any_of(fdr_col), any_of(p_col)) %>%
+    rename(ncRNA = hub_ncRNA, mRNA = !!m_col, Correlation = !!corr_col) %>%
+    mutate(Correlation = as.numeric(Correlation))
+  
+  # Save edges
+  readr::write_csv(edges_top_clean, file.path(outdir, "TopHub_ncRNA_mRNA_edges.csv"))
+  message("Saved TopHub_ncRNA_mRNA_edges.csv (top N per hub).")
+}
+
+#################################################################
+### 4. Define Immune Hub Genes (provided) and intersect with mRNA targets
+#################################################################
+
+# Why: immune hub genes are biologically interesting and will validate immune-related enrichment.
+immune_hubs <- c(
+  "CD69","CCR7","CD27","CD2","CCL5","CD247",
+  "GZMA","CD3D","GZMK","IL2RB","CXCL9","CCL19",
+  "CXCL13","CXCL10","CD48","VCAM1","CD79B","SLAMF6","CD79A","SH2D1A"
+)
+
+# Find which immune hub genes appear in the top-edge targets
+immune_in_edges <- character(0)
+if(exists("edges_top_clean") && nrow(edges_top_clean) > 0){
+  immune_in_edges <- intersect(unique(edges_top_clean$mRNA), immune_hubs)
+  message("Immune hub genes found among top-targets: ", paste(immune_in_edges, collapse = ", "))
+  readr::write_csv(tibble(immune_gene = immune_in_edges), file.path(outdir, "ImmuneHubs_in_TopEdges.csv"))
+} else {
+  message("No edges found to check immune hub overlap.")
+}
+
+#################################################################
+### 5. Identify most dysregulated ncRNAs from DEG results (extreme fold change)
+#################################################################
+
+# Why: the most extreme fold-changes often indicate drivers or specific markers of the phenotype.
+# We'll take top 10 upregulated and top 10 downregulated by absolute logFC (and significant).
+
+# Ensure consistent column names
+names(deg_table) <- tolower(names(deg_table))
+
+# Determine the name of hgnc symbol, logfc, adj.p.val
+symbol_col <- grep("hgnc|gene", names(deg_table), ignore.case = TRUE, value = TRUE)[1]
+logfc_col <- grep("^logfc$|log2foldchange|log2fc|log2fold", names(deg_table), ignore.case = TRUE, value = TRUE)[1]
+padj_col <- grep("adj.p|fdr|padj|adj", names(deg_table), ignore.case = TRUE, value = TRUE)[1]
+
+# Fallbacks - assume standard names if detection fails
+if(is.na(symbol_col)) symbol_col <- names(deg_table)[1]
+if(is.na(logfc_col)) logfc_col <- "logfc"
+if(is.na(padj_col)) padj_col <- "adj.p.val"
+
+# Convert logFC to numeric
+deg_table <- deg_table %>% mutate(logFC_num = as.numeric(.data[[logfc_col]]))
+
+# Filter significant genes (if adj p exists), else use all
+if(!is.na(padj_col) && padj_col %in% names(deg_table)){
+  deg_sig <- deg_table %>% filter(!is.na(.data[[padj_col]]) & .data[[padj_col]] < 0.05)
+} else {
+  deg_sig <- deg_table
+}
+
+# Top upregulated (largest positive logFC) and top downregulated (most negative)
+top_up <- deg_sig %>% arrange(desc(logFC_num)) %>% head(10) %>% pull(.data[[symbol_col]])
+top_down <- deg_sig %>% arrange(logFC_num) %>% head(10) %>% pull(.data[[symbol_col]])
+
+top_dysregulated <- unique(c(top_up, top_down))
+message("Top dysregulated ncRNAs (up + down): ", paste(top_dysregulated, collapse = ", "))
+readr::write_csv(tibble(ncRNA = top_dysregulated), file.path(outdir, "Top_Dysregulated_ncRNAs_Top10up10down.csv"))
+
+#################################################################
+### 6. Combine candidate ncRNAs for Phase 6 annotation
+#################################################################
+
+# Candidate set = union of:
+# - top10 WGCNA hubs
+# - top dysregulated ncRNAs
+# - any ncRNAs that appear in edges_top_clean (as sources)
+candidates <- unique(c(top10_hubs, top_dysregulated, if(exists("edges_top_clean")) unique(edges_top_clean$ncRNA) else character(0)))
+message("Total candidate ncRNAs for annotation: ", length(candidates))
+readr::write_csv(tibble(ncRNA = candidates), file.path(outdir, "Phase6_Candidate_ncRNAs.csv"))
+
+#################################################################
+### 7. Annotate candidate ncRNAs via Ensembl (biomaRt)
+#################################################################
+
+# Why: we get gene biotype, Ensembl ID, Entrez (if available) and description so we know what kind of ncRNA each is and any annotation.
+ensembl <- NULL
+try({
+  ensembl <- biomaRt::useEnsembl("genes", dataset = "hsapiens_gene_ensembl")
+}, silent = TRUE)
+if(is.null(ensembl)){
+  # fallback to mirror
+  ensembl <- biomaRt::useEnsembl("genes", dataset = "hsapiens_gene_ensembl", mirror = "us")
+}
+
+annotations_ncRNA <- tibble(ncRNA = candidates)
+if(!is.null(ensembl) && length(candidates) > 0){
+  bm <- biomaRt::getBM(
+    attributes = c("hgnc_symbol","ensembl_gene_id","gene_biotype","description","entrezgene_id"),
+    filters = "hgnc_symbol",
+    values = candidates,
+    mart = ensembl
+  )
+  bm_unique <- bm[!duplicated(bm$hgnc_symbol), ]
+  annotations_ncRNA <- annotations_ncRNA %>% left_join(bm_unique %>% rename(ncRNA = hgnc_symbol), by = "ncRNA")
+} else {
+  message("BioMart not available - ncRNA annotation will be incomplete.")
+}
+
+readr::write_csv(annotations_ncRNA, file.path(outdir, "Phase6_ncRNA_annotations.csv"))
+message("Saved Phase6_ncRNA_annotations.csv")
+
+#################################################################
+### 8. Prepare mRNA target list for enrichment (unique mRNAs from edges_top_clean)
+#################################################################
+
+# Why: enrichment is done on mRNAs (protein-coding) to understand pathways regulated by ncRNAs.
+if(exists("edges_top_clean") && nrow(edges_top_clean) > 0){
+  mRNA_targets <- unique(edges_top_clean$mRNA)
+  # Map to Entrez using org.Hs.eg.db
+  mapped_entrez <- mapIds(org.Hs.eg.db, keys = mRNA_targets, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
+  mRNA_entrez_df <- tibble(mRNA_symbol = names(mapped_entrez), entrez = as.integer(mapped_entrez))
+  readr::write_csv(mRNA_entrez_df, file.path(outdir, "Phase6_mRNA_targets_entrez.csv"))
+  message("Saved Phase6_mRNA_targets_entrez.csv")
+} else {
+  message("No mRNA targets found (edges_top_clean missing). Enrichment will be skipped.")
+  mRNA_entrez_df <- tibble(mRNA_symbol = character(0), entrez = integer(0))
+}
+
+#################################################################
+### 9. Functional enrichment: GO BP, KEGG, Reactome (on mRNA targets)
+#################################################################
+
+# Why: to discover biological processes and pathways these mRNA targets (and thus the ncRNAs) are involved in.
+enrich_go <- NULL; enrich_kegg <- NULL; enrich_reactome <- NULL
+
+entrez_vec <- na.omit(unique(mRNA_entrez_df$entrez))
+if(length(entrez_vec) > 0){
+  # GO Biological Process
+  enrich_go <- tryCatch({
+    clusterProfiler::enrichGO(gene = as.character(entrez_vec),
+                             OrgDb = org.Hs.eg.db,
+                             keyType = "ENTREZID",
+                             ont = "BP",
+                             pAdjustMethod = "BH",
+                             pvalueCutoff = 0.05,
+                             qvalueCutoff = 0.2,
+                             readable = TRUE)
+  }, error = function(e){ message("GO enrichment failed: ", e$message); NULL })
+  
+  # KEGG
+  enrich_kegg <- tryCatch({
+    clusterProfiler::enrichKEGG(gene = as.character(entrez_vec),
+                                organism = "hsa",
+                                pAdjustMethod = "BH",
+                                pvalueCutoff = 0.05)
+  }, error = function(e){ message("KEGG enrichment failed: ", e$message); NULL })
+  
+  # Reactome
+  enrich_reactome <- tryCatch({
+    ReactomePA::enrichPathway(gene = as.character(entrez_vec),
+                              organism = "human",
+                              pvalueCutoff = 0.05,
+                              pAdjustMethod = "BH",
+                              qvalueCutoff = 0.2,
+                              readable = TRUE)
+  }, error = function(e){ message("Reactome enrichment failed: ", e$message); NULL })
+  
+  # Save results to CSV
+  if(!is.null(enrich_go)) readr::write_csv(as.data.frame(enrich_go), file.path(outdir, "Phase6_Enrichment_GO_BP.csv"))
+  if(!is.null(enrich_kegg)) readr::write_csv(as.data.frame(enrich_kegg), file.path(outdir, "Phase6_Enrichment_KEGG.csv"))
+  if(!is.null(enrich_reactome)) readr::write_csv(as.data.frame(enrich_reactome), file.path(outdir, "Phase6_Enrichment_Reactome.csv"))
+  message("Saved enrichment tables (if not NULL).")
+  
+} else {
+  message("No Entrez IDs available for enrichment.")
+}
+
+#################################################################
+### 10. Enrichment plots (dotplots) & heatmap summary
+#################################################################
+
+# Dotplots are quick visual summaries of the top enriched terms.
+if(!is.null(enrich_go) && nrow(as.data.frame(enrich_go))>0){
+  png(file.path(outdir, "Phase6_GO_dotplot.png"), width = 1400, height = 900, res = 150)
+  print(clusterProfiler::dotplot(enrich_go, showCategory = 20) + ggplot2::ggtitle("GO BP enrichment (mRNA targets)"))
+  dev.off()
+}
+if(!is.null(enrich_kegg) && nrow(as.data.frame(enrich_kegg))>0){
+  png(file.path(outdir, "Phase6_KEGG_dotplot.png"), width = 1400, height = 900, res = 150)
+  print(clusterProfiler::dotplot(enrich_kegg, showCategory = 20) + ggplot2::ggtitle("KEGG enrichment (mRNA targets)"))
+  dev.off()
+}
+if(!is.null(enrich_reactome) && nrow(as.data.frame(enrich_reactome))>0){
+  png(file.path(outdir, "Phase6_Reactome_dotplot.png"), width = 1400, height = 900, res = 150)
+  print(clusterProfiler::dotplot(enrich_reactome, showCategory = 20) + ggplot2::ggtitle("Reactome enrichment (mRNA targets)"))
+  dev.off()
+}
+
+#################################################################
+### 11. Build Cytoscape-ready network files (edges + nodes)
+#################################################################
+
+# Edges: use edges_top_clean (ncRNA source, mRNA target, correlation weight)
+if(exists("edges_top_clean") && nrow(edges_top_clean) > 0){
+  edges_cyt <- edges_top_clean %>%
+    rename_with(.fn = tolower) %>%
+    rename(source = ncRNA, target = mRNA, correlation = correlation) %>%
+    mutate(weight = abs(as.numeric(correlation)),
+           interaction = ifelse(as.numeric(correlation) > 0, "positive", "negative")) %>%
+    select(source, target, weight, correlation, interaction)
+  
+  readr::write_csv(edges_cyt, file.path(outdir, "Phase6_network_edges_cytoscape.csv"))
+  message("Saved Phase6_network_edges_cytoscape.csv")
+  
+  # Nodes: annotate ncRNA nodes + mRNA nodes
+  nc_nodes <- annotations_ncRNA %>% rename(name = ncRNA) %>% mutate(type = "ncRNA")
+  m_nodes <- tibble(name = unique(edges_cyt$target), type = "mRNA") %>%
+    left_join(mRNA_entrez_df %>% rename(name = mRNA_symbol), by = "name") %>%
+    mutate(biotype = "protein_coding", description = NA, ensembl = NA)
+  
+  nodes_cyt <- bind_rows(nc_nodes %>% mutate(biotype = ifelse(is.na(biotype), "ncRNA", biotype)),
+                         m_nodes) %>%
+    dplyr::select(name, type, biotype, entrez, ensembl, description) %>%
+    distinct()
+  
+  readr::write_csv(nodes_cyt, file.path(outdir, "Phase6_network_nodes_cytoscape.csv"))
+  message("Saved Phase6_network_nodes_cytoscape.csv")
+} else {
+  message("Edges for network not found; skipping Cytoscape file generation.")
+}
+
+#################################################################
+### 12. Quick igraph snapshot (PNG)
+#################################################################
+if(exists("edges_cyt") && exists("nodes_cyt")){
+  message("Creating igraph snapshot of the network...")
+  g <- igraph::graph_from_data_frame(d = edges_cyt, vertices = nodes_cyt, directed = FALSE)
+  V(g)$color <- ifelse(V(g)$type == "ncRNA", "tomato", "skyblue")
+  V(g)$size <- ifelse(V(g)$type == "ncRNA", 6, 8)
+  E(g)$width <- scales::rescale(edges_cyt$weight, to = c(0.5, 3))
+  
+  png(file.path(outdir, "Phase6_network_snapshot_igraph.png"), width = 1800, height = 1400, res = 150)
+  plot(g, vertex.label.cex = 0.8, vertex.label.color = "black", vertex.frame.color = "white")
+  dev.off()
+  message("Saved Phase6_network_snapshot_igraph.png")
+}
+
+#################################################################
+### 13. Write Phase6 summary and save workspace
+#################################################################
+summary_lines <- c()
+summary_lines <- c(summary_lines, paste("PHASE 6: Functional Annotation & Validation - Top10 Hubs"))
+summary_lines <- c(summary_lines, paste("Date:", Sys.Date()))
+summary_lines <- c(summary_lines, "")
+summary_lines <- c(summary_lines, paste("Top10 hub ncRNAs (Turquoise):", paste(top10_hubs, collapse = ", ")))
+summary_lines <- c(summary_lines, paste("Total candidate ncRNAs annotated:", length(candidates)))
+summary_lines <- c(summary_lines, paste("Total unique mRNA targets for enrichment:", length(unique(mRNA_entrez_df$mRNA_symbol))))
+summary_lines <- c(summary_lines, paste("Immune hub genes present among targets:", paste(immune_in_edges, collapse = ", ")))
+summary_lines <- c(summary_lines, "")
+summary_lines <- c(summary_lines, "Files produced:")
+for(f in list.files(outdir)) summary_lines <- c(summary_lines, paste(" -", f))
+writeLines(summary_lines, con = file.path(outdir, "Phase6_Summary.txt"))
+message("Wrote Phase6_Summary.txt")
+
+save.image(file = file.path(outdir, "Phase6_workspace.RData"))
+message("Saved Phase6_workspace.RData")
+
+#################################################################
+### 14. (Optional) Prepare an RMarkdown skeleton for final PDF report
+#################################################################
+
+# We will not auto-knit here, but create a simple Rmd file the team can edit/knit.
+rmd_path <- file.path(outdir, "Phase6_Report_skeleton.Rmd")
+rmd_lines <- c(
+  "---",
+  "title: \"Phase 6 — Functional Annotation & Validation\"",
+  "author: \"Internship Project\"",
+  "date: \"`r Sys.Date()`\"",
+  "output: pdf_document",
+  "---",
+  "",
+  "```{r setup, include=FALSE}",
+  "knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)",
+  "library(readr); library(dplyr); library(ggplot2)",
+  "```",
+  "",
+  "## Summary",
+  "",
+  "Phase 6: annotated top hubs, mRNA targets, enrichment and network files. See Phase6_outputs folder.",
+  "",
+  "## Top hub ncRNAs",
+  "",
+  "```{r top-hubs}",
+  "top10 <- read_csv('Phase6_outputs/Top10_Turquoise_Hub_ncRNAs.csv', show_col_types = FALSE)",
+  "print(top10)",
+  "```",
+  "",
+  "## Enrichment results (GO)",
+  "",
+  "```{r go-table, echo=FALSE}",
+  "if(file.exists('Phase6_outputs/Phase6_Enrichment_GO_BP.csv')){",
+  "  go <- read_csv('Phase6_outputs/Phase6_Enrichment_GO_BP.csv', show_col_types = FALSE)",
+  "  print(head(go, 20))",
+  "}",
+  "```"
+)
+writeLines(rmd_lines, con = rmd_path)
+message("Created RMarkdown skeleton: ", rmd_path)
+message("To create final PDF, open the Rmd and 'Knit' to PDF in RStudio.")
+
+#################################################################
+### END PHASE 6 SCRIPT
+#################################################################
+message("PHASE 6 completed. Check folder: ", outdir)
